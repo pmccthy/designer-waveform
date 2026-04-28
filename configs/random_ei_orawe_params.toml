@@ -1,0 +1,50 @@
+# Configuration for RandomEINetwork
+# Membrane and opsin parameters matched to O'Rawe et al. 2023
+# (corticalSuppressionRepo): C_m = 200 pF, tau_r = 5 ms,
+# lognormal opsin distribution fit from 2-photon data.
+
+[network]
+N_exc    = 8000   # number of excitatory neurons
+N_inh    = 2000   # number of inhibitory neurons
+p_conn   = 0.02   # connection probability (all-to-all pairs)
+
+[membrane]
+C_m_pF      = 200.0   # membrane capacitance (pF)
+g_L_nS      = 10.0    # leak conductance (nS)
+E_L_mV      = -60.0   # leak reversal potential (mV)
+V_reset_mV  = -60.0   # reset voltage after spike (mV)
+V_thresh_mV = -50.0   # spike threshold (mV)
+tau_r_ms    = 5.0     # refractory period (ms)
+
+[synapses]
+E_inh_mV      = -80.0   # inhibitory reversal potential (mV)
+tau_exc_ms    = 5.0     # excitatory synaptic time constant (ms)
+tau_inh_ms    = 10.0    # inhibitory synaptic time constant (ms)
+w_ee_mean_nS  = 0.4     # E→E mean synaptic weight (nS)
+w_ee_var_nS   = 0.4     # E→E weight std (nS)
+w_ei_mean_nS  = 0.8     # E→I mean synaptic weight (nS)
+w_ei_var_nS   = 0.8     # E→I weight std (nS)
+w_ii_mean_nS  = 4.0     # I→I mean synaptic weight (nS)
+w_ii_var_nS   = 4.0     # I→I weight std (nS)
+w_ie_mean_nS  = 5.0     # I→E mean synaptic weight (nS)
+w_ie_var_nS   = 5.0     # I→E weight std (nS)
+I_bg_exc_pA   = 260.0   # background drive to excitatory neurons (pA)
+I_bg_inh_pA   = 140.0   # background drive to inhibitory neurons (pA)
+
+[opto]
+# Lognormal fit to per-neuron opsin expression from O'Rawe et al. 2023 2p data.
+# scipy.stats.lognorm(s, loc, scale) parameterisation.
+# Values are clipped to [0, 1] then scaled by I_max_pA.
+lognormal_s     = 0.6324531774890443
+lognormal_loc   = 0.006100072101138047
+lognormal_scale = 0.23865410791827243
+sparsity        = 0.168    # fraction of neurons with zero opsin expression
+I_max_pA        = 1700.0   # peak opto current for a neuron with weight = 1 (pA)
+
+[simulation]
+dt_ms        = 0.1     # integration timestep (ms)
+t_pre_ms     = 500.0   # pre-stimulus period (ms)
+t_stim_ms    = 200.0   # stimulation window duration (ms)
+t_post_ms    = 400.0   # post-stimulus period (ms)
+psth_bin_ms  = 5.0     # PSTH bin width (ms)
+seed         = 20250319

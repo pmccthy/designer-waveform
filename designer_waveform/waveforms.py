@@ -1,3 +1,8 @@
+"""
+Classes for parameterised waveforms and optimisation logic.
+Author: patrick.mccarthy@dpag.ox.ac.uk
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
@@ -32,36 +37,78 @@ class Waveform(ABC):
         """Construct an instance from a flat parameter array."""
         ...
 
-    def optimise(self, objective_fn, method='Nelder-Mead', bounds=None, **kwargs):
-        """
-        Optimise waveform parameters against a simulation-based objective.
+    def optimise(
+        self,
+        objective_fn,
+        method="Nelder-Mead",
+        bounds=None,
+        verbose=True,
+        log_every=10,
+        **kwargs,
+    ):
+        """Optimise waveform parameters against a simulation-based objective.
 
-        Parameters
-        ----------
-        objective_fn : callable(waveform) -> float
-            Takes a Waveform instance, runs the simulation, and returns a scalar
-            loss (e.g. MSE between simulated PSTH and target PSTH).
-        method : str
-            scipy.optimize.minimize method. 'Nelder-Mead' works well for
-            gradient-free black-box objectives. Use 'L-BFGS-B' with bounds if
-            you have a differentiable proxy, or switch to differential_evolution
-            for a global search.
-        bounds : sequence of (min, max) pairs, optional
-            One per parameter. Required for bounded methods.
+        Args:
+            objective_fn: Callable ``(waveform) -> float``.  Takes a Waveform
+                instance, runs the simulation, and returns a scalar loss (e.g.
+                MSE between simulated PSTH and target PSTH).
+            method: ``scipy.optimize.minimize`` method.  ``'Nelder-Mead'``
+                works well for gradient-free black-box objectives.  Use
+                ``'L-BFGS-B'`` with bounds for differentiable proxies, or
+                ``differential_evolution`` for a global search.
+            bounds: Sequence of ``(min, max)`` pairs, one per parameter.
+                Required for bounded methods.
+            verbose: If ``True``, print a progress line every ``log_every``
+                objective calls plus a summary on completion.
+            log_every: Number of objective calls between progress lines.
+            **kwargs: Forwarded to ``scipy.optimize.minimize``.
 
-        Returns
-        -------
-        result_waveform : Waveform
-            New instance with optimised parameters.
-        opt_result : OptimizeResult
-            Full scipy result object (check opt_result.success, .fun, .nit).
+        Returns:
+            tuple:
+                - **result_waveform** (*Waveform*) — new instance with
+                  optimised parameters.
+                - **opt_result** (*OptimizeResult*) — full scipy result object
+                  (check ``.success``, ``.fun``, ``.nit``).
         """
+        import sys
+
+        _state = {"n_calls": 0, "best_loss": float("inf"), "best_params": None}
+
         def _objective(params):
             wf = self.from_params(params)
-            return objective_fn(wf)
+            loss = float(objective_fn(wf))
+            _state["n_calls"] += 1
+            if loss < _state["best_loss"]:
+                _state["best_loss"] = loss
+                _state["best_params"] = params.copy()
+            if verbose and _state["n_calls"] % log_every == 0:
+                print(
+                    f"  call {_state['n_calls']:4d} | "
+                    f"best loss {_state['best_loss']:.6e} | "
+                    f"{self.from_params(_state['best_params'])}",
+                    flush=True,
+                )
+            return loss
 
-        opt_result = minimize(_objective, self.to_params(),
-                              method=method, bounds=bounds, **kwargs)
+        if verbose:
+            print(f"Starting {method} optimisation ({len(self.to_params())} params)")
+            print(f"  Initial waveform: {self}")
+            sys.stdout.flush()
+
+        opt_result = minimize(
+            _objective, self.to_params(), method=method, bounds=bounds, **kwargs
+        )
+
+        if verbose:
+            status = "converged" if opt_result.success else "stopped"
+            print(
+                f"\n{status} after {_state['n_calls']} calls ({opt_result.nit} iters) | "
+                f"loss {opt_result.fun:.6e} | success={opt_result.success}"
+            )
+            if not opt_result.success:
+                print(f"  scipy message: {opt_result.message}")
+            sys.stdout.flush()
+
         return self.from_params(opt_result.x), opt_result
 
     def plot(self, t: np.ndarray, ax=None, **kwargs):
