@@ -1,10 +1,10 @@
 # designer-waveform
 
-A framework for optimising stimulation waveforms to evoke naturalistic population activity in neural circuits.
+A framework for optimising stimulation waveforms to evoke naturalistic population activity in models of cortical circuits.
 
 ## Overview
 
-Optogenetic and electrical stimulation rarely produce the same population-level activity as natural sensory input. This repository provides tools to close that gap: given a target population response (e.g. a PSTH recorded during natural stimulation), it searches the space of parametric waveforms to find the stimulus shape that drives a neural population model towards that target.
+Typical optogenetic stimulation protocols do not produce the same population-level activity as natural sensory input, partally due to strong synchronous stimulation. This repository provides tools to close that gap: given a target population response (e.g. a PSTH recorded during natural stimulation), it searches the space of parametric waveforms to find the stimulus shape that drives a neural population model towards that target.
 
 The core design separates waveform parameterisation from simulation logic. Any callable that maps a waveform to a scalar loss can be used as the objective, making it straightforward to swap in different neural population models (Brian2, rate models, etc.) without modifying the waveform or optimisation code.
 
@@ -51,5 +51,4 @@ print(best_wf)
 ## Dependencies
 
 - [Brian2](https://brian2.readthedocs.io/) — spiking neural network simulation
-- [CLEOSim](https://cleosim.readthedocs.io/) — closed-loop neuroscience simulation
 - NumPy, SciPy, Matplotlib
