@@ -1,0 +1,39 @@
+{
+  "N_exc": 8000,
+  "N_inh": 2000,
+  "p_conn": 0.02,
+
+  "C_m_pF": 200.0,
+  "g_L_nS": 10.0,
+  "E_L_mV": -60.0,
+  "V_reset_mV": -60.0,
+  "V_thresh_mV": -50.0,
+  "tau_r_ms": 5.0,
+
+  "E_inh_mV": -80.0,
+  "tau_exc_ms": 5.0,
+  "tau_inh_ms": 10.0,
+  "w_ee_mean_nS": 0.4,
+  "w_ee_var_nS": 0.4,
+  "w_ei_mean_nS": 0.8,
+  "w_ei_var_nS": 0.8,
+  "w_ii_mean_nS": 4.0,
+  "w_ii_var_nS": 4.0,
+  "w_ie_mean_nS": 5.0,
+  "w_ie_var_nS": 5.0,
+  "I_bg_exc_pA": 260.0,
+  "I_bg_inh_pA": 140.0,
+
+  "lognormal_s": 0.6324531774890443,
+  "lognormal_loc": 0.006100072101138047,
+  "lognormal_scale": 0.23865410791827243,
+  "sparsity": 0.168,
+  "I_max_pA": 1700.0,
+
+  "dt_ms": 0.1,
+  "t_pre_ms": 500.0,
+  "t_stim_ms": 200.0,
+  "t_post_ms": 400.0,
+  "psth_bin_ms": 5.0,
+  "seed": 20250319
+}
