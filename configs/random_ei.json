@@ -30,10 +30,10 @@
   "sparsity": 0.168,
   "I_max_pA": 1700.0,
 
-  "dt_ms": 0.1,
+  "dt_ms": 0.01,
   "t_pre_ms": 500.0,
   "t_stim_ms": 200.0,
   "t_post_ms": 400.0,
-  "psth_bin_ms": 5.0,
+  "psth_bin_ms": 1.0,
   "seed": 20250319
 }

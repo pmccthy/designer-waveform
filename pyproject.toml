@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=2.0",
     "matplotlib>=2.0",
     "scipy>=0.13.3",
+    "pynwb",
 ]
 
 [tool.setuptools.packages.find]

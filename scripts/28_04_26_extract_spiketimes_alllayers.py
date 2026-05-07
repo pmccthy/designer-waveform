@@ -5,6 +5,31 @@ Saves raw spike times (s re stim onset) so bin size can be chosen freely at anal
 Usage:
     python scripts/28_04_26_extract_spiketimes_alllayers.py
 """
+import subprocess
+import sys
+
+# ── pynwb/hdmf compatibility check (must be first — allensdk imports pynwb) ──
+try:
+    import pynwb
+    from packaging.version import Version
+    needs_fix = Version(pynwb.__version__) >= Version('2.6.0')
+    version_str = pynwb.__version__
+except ImportError:
+    needs_fix = True
+    version_str = 'unimportable'
+
+if needs_fix:
+    print(f'pynwb ({version_str}) incompatible with allensdk — installing pynwb<2.6 + hdmf<4...')
+    subprocess.run(
+        [sys.executable, '-m', 'pip', 'install',
+         'pynwb>=2.3,<2.6', 'hdmf>=3.5,<4', '--quiet'],
+        check=True,
+    )
+    print('Done — please re-run this script for the change to take effect.')
+    sys.exit(0)
+
+print(f'pynwb {pynwb.__version__} OK')
+
 import pickle
 import time
 from datetime import timedelta
@@ -18,7 +43,7 @@ T_PRE  = 0.05   # seconds before stim onset to retain
 T_POST = 0.35   # seconds after stim onset to retain
 
 CACHE_DIR = Path('/Users/pmccarthy/Documents/experimental_data/allen_visual_neuropixels_longwindow_5ms_bins')
-OUT_DIR   = CACHE_DIR / 'spike_times'
+OUT_DIR   = CACHE_DIR / 'spike_times_v2'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 cache = EcephysProjectCache.from_warehouse(manifest=str(CACHE_DIR / 'manifest.json'))
@@ -85,33 +110,27 @@ for session_num, session_id in enumerate(v1_ns_sessions.index, start=1):
     unit_id_to_idx = {int(uid): k for k, uid in enumerate(unit_ids)}
     all_trial_ids  = np.array(list(trial_id_to_idx.keys()))
 
-    # fetch all spike times in one call
-    spike_df = session.presentationwise_spike_times(
-        stimulus_presentation_ids=all_trial_ids,
-        unit_ids=unit_ids,
-    ).reset_index()
-
-    # keep only spikes within analysis window
-    spike_df = spike_df[
-        (spike_df['time_since_stimulus_onset'] >= -T_PRE) &
-        (spike_df['time_since_stimulus_onset'] <=  T_POST)
-    ]
+    # build sorted spike-time arrays per unit for fast searchsorted windowing
+    unit_spike_times = {int(uid): np.sort(session.spike_times[uid]) for uid in unit_ids}
 
     # 3D object array: spikes[stim_idx, trial_idx, unit_idx] = float32 array of spike times
     spikes = np.empty((num_stim, num_trials, num_units), dtype=object)
     for idx in np.ndindex(spikes.shape):
         spikes[idx] = np.array([], dtype=np.float32)
 
-    grouped = (spike_df
-               .groupby(['stimulus_presentation_id', 'unit_id'])['time_since_stimulus_onset']
-               .apply(np.array))
-    for (trial_id, unit_id), times in grouped.items():
-        ij = trial_id_to_idx.get(int(trial_id))
-        k  = unit_id_to_idx.get(int(unit_id))
-        if ij is not None and k is not None:
-            spikes[ij[0], ij[1], k] = times.astype(np.float32)
+    for trial_id, (stim_idx, trial_idx) in trial_id_to_idx.items():
+        t_onset = ns_valid.loc[trial_id, 'start_time']
+        t_lo    = t_onset - T_PRE
+        t_hi    = t_onset + T_POST
+        for k, uid in enumerate(unit_ids):
+            st   = unit_spike_times[int(uid)]
+            i_lo = np.searchsorted(st, t_lo)
+            i_hi = np.searchsorted(st, t_hi, side='right')
+            if i_hi > i_lo:
+                spikes[stim_idx, trial_idx, k] = (st[i_lo:i_hi] - t_onset).astype(np.float32)
 
-    print(f'  spikes shape: {spikes.shape}')
+    print(f'  spikes shape: {spikes.shape}  '
+          f'non-empty: {sum(s.size > 0 for s in spikes.flat)}/{spikes.size}')
 
     trial_start_times = np.array([
         ns_valid[ns_valid.frame == fid].start_time.values[:num_trials]
