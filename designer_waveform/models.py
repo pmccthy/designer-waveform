@@ -106,7 +106,7 @@ class RandomEINetwork:
 
         return dist * c.I_max_pA
 
-    def run(self, waveform: Waveform) -> dict:
+    def run(self, waveform: Waveform, seed: int | None = None) -> dict:
         """Run one simulation with the given stimulation waveform.
 
         The waveform is evaluated on ``[0, t_stim_ms]`` and used as a
@@ -115,11 +115,15 @@ class RandomEINetwork:
 
             I_opto(t, i) = waveform(t) * stim_dist_pA[i]
 
-        The network is rebuilt from scratch with a fixed seed on every call,
-        so results are deterministic and comparable across waveforms.
+        The network is rebuilt from scratch on every call.  By default the
+        seed from the config is used, making the call deterministic.  Pass a
+        different ``seed`` to get an independent stochastic realisation (e.g.
+        for multi-run variability estimates).
 
         Args:
             waveform: Waveform instance defining the stimulus envelope.
+            seed: Random seed for Brian2 and numpy.  ``None`` uses
+                ``cfg.seed`` (deterministic default).
 
         Returns:
             dict with keys:
@@ -156,11 +160,13 @@ class RandomEINetwork:
             stim_vals, self._stim_dist_pA
         ).astype(np.float32)
 
+        _seed = c.seed if seed is None else seed
+
         b2.start_scope()
-        b2.seed(c.seed)
+        b2.seed(_seed)
         b2.defaultclock.dt = dt
 
-        rng = np.random.default_rng(c.seed)
+        rng = np.random.default_rng(_seed)
         bgcurrent = b2.TimedArray(timed_input * pA, dt=dt)
 
         eqs = """
