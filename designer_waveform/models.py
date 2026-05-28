@@ -21,10 +21,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Literal
 
 import numpy as np
 import scipy.stats as stats
 
+from designer_waveform.optics import OpticsConfig, PowerToCurrentCurve
 from designer_waveform.waveforms import Waveform
 
 
@@ -75,8 +77,43 @@ class RandomEINetwork:
         >>> psth = result["psth_exc"]
     """
 
-    def __init__(self, config: SimpleNamespace):
+    def __init__(
+        self,
+        config: SimpleNamespace,
+        optics: OpticsConfig | None = None,
+        power_curve: PowerToCurrentCurve | None = None,
+        normalization: Literal["max_expression", "pop_mean"] = "max_expression",
+    ):
+        """
+        Args:
+            config: Network and stimulus parameters from :func:`load_config`.
+            optics: Optional :class:`~designer_waveform.optics.OpticsConfig`
+                defining the optical path attenuation.  When provided together
+                with ``power_curve``, the waveform is interpreted as source
+                power (mW) and converted to per-neuron current via the full
+                optical pipeline.  When ``None``, the waveform is treated as a
+                dimensionless amplitude envelope (legacy behaviour).
+            power_curve: Optional :class:`~designer_waveform.optics.PowerToCurrentCurve`
+                mapping tissue irradiance (mW/mm²) to photocurrent (pA).
+                Must be provided alongside ``optics`` to activate the optical
+                pipeline.
+            normalization: How the power-to-current curve relates to the
+                per-neuron opsin expression distribution.
+
+                ``"max_expression"`` — the curve gives the current received by
+                a maximally-expressing neuron.  Per-neuron current is scaled by
+                ``stim_dist_pA / I_max_pA``, which lives in [0, 1].
+
+                ``"pop_mean"`` — the curve gives the population-mean current.
+                Per-neuron current is scaled by
+                ``stim_dist_pA / stim_dist_pA.mean()``, so above-mean neurons
+                receive more than the curve value.  An explicit per-neuron clip
+                at ``I_max_pA`` is applied to prevent unphysical values.
+        """
         self.cfg = config
+        self.optics = optics
+        self.power_curve = power_curve
+        self.normalization = normalization
         self._stim_dist_pA = self._build_stim_dist()
 
     def _build_stim_dist(self) -> np.ndarray:
@@ -106,24 +143,83 @@ class RandomEINetwork:
 
         return dist * c.I_max_pA
 
-    def run(self, waveform: Waveform, seed: int | None = None) -> dict:
+    def _stim_to_current(self, stim_vals: np.ndarray) -> np.ndarray:
+        """Convert waveform values to a (n_ts × N_exc) current matrix (pA).
+
+        When ``optics`` and ``power_curve`` are both set, ``stim_vals`` is
+        treated as source power (mW) and converted through the full optical
+        pipeline.  Otherwise ``stim_vals`` is the dimensionless amplitude
+        envelope and the original linear scaling is used.
+
+        Returns:
+            float32 array of shape ``(len(stim_vals), N_exc)`` in pA.
+        """
+        c = self.cfg
+        if self.optics is not None and self.power_curve is not None:
+            irradiance = self.optics.source_power_to_irradiance(stim_vals)
+            mean_current = self.power_curve(irradiance)  # (n_ts,) pA
+            if self.normalization == "max_expression":
+                # curve = current at full opsin expression; scale by [0,1] fraction
+                expr_weights = self._stim_dist_pA / c.I_max_pA
+                out = np.outer(mean_current, expr_weights)
+            else:  # pop_mean
+                # curve = population-mean current; scale by relative expression
+                rel_weights = self._stim_dist_pA / self._stim_dist_pA.mean()
+                out = np.outer(mean_current, rel_weights)
+                np.clip(out, 0, c.I_max_pA, out=out)
+        else:
+            out = np.outer(stim_vals, self._stim_dist_pA)
+        return out.astype(np.float32)
+
+    def run(
+        self,
+        waveform: Waveform,
+        seed: int | None = None,
+        vary_init_v: bool = True,
+        vary_connectivity: bool = True,
+        vary_weights: bool = True,
+    ) -> dict:
         """Run one simulation with the given stimulation waveform.
 
-        The waveform is evaluated on ``[0, t_stim_ms]`` and used as a
-        dimensionless temporal envelope.  The actual current injected into
-        excitatory neuron *i* at time *t* (relative to stimulus onset) is::
+        The waveform is evaluated on ``[0, t_stim_ms]``.  Its interpretation
+        depends on whether an optical pipeline was configured at construction:
+
+        *Dimensionless mode* (no ``optics``/``power_curve``): the waveform is
+        a temporal envelope in [0, 1] and the current injected into neuron *i*
+        at time *t* is::
 
             I_opto(t, i) = waveform(t) * stim_dist_pA[i]
 
+        *Power mode* (``optics`` and ``power_curve`` both set): the waveform
+        gives source optical power in mW.  The current is::
+
+            irradiance(t)  = waveform(t) × total_transmission / area_mm2
+            I_opto(t, i)   = power_curve(irradiance(t)) × expr_weight[i]
+
+        where ``expr_weight`` is ``stim_dist_pA / I_max_pA`` for
+        ``normalization="max_expression"`` or
+        ``stim_dist_pA / stim_dist_pA.mean()`` (clipped at ``I_max_pA``)
+        for ``normalization="pop_mean"``.
+
         The network is rebuilt from scratch on every call.  By default the
         seed from the config is used, making the call deterministic.  Pass a
-        different ``seed`` to get an independent stochastic realisation (e.g.
-        for multi-run variability estimates).
+        different ``seed`` to get an independent stochastic realisation.
+
+        Each source of randomness can be independently toggled.  When a source
+        is disabled it always uses ``cfg.seed``, so only the enabled sources
+        differ across runs.
 
         Args:
             waveform: Waveform instance defining the stimulus envelope.
-            seed: Random seed for Brian2 and numpy.  ``None`` uses
-                ``cfg.seed`` (deterministic default).
+            seed: Base random seed.  ``None`` uses ``cfg.seed`` (fully
+                deterministic).  Each source derives its own seed from this
+                value so the three sources are independent.
+            vary_init_v: If ``False``, initial membrane voltages are the same
+                across all runs (uses ``cfg.seed``).
+            vary_connectivity: If ``False``, synaptic connectivity pattern is
+                the same across all runs.
+            vary_weights: If ``False``, synaptic weight values are the same
+                across all runs.
 
         Returns:
             dict with keys:
@@ -156,17 +252,23 @@ class RandomEINetwork:
         timed_input = np.empty((n_ts_total, c.N_exc + c.N_inh), dtype=np.float32)
         timed_input[:, : c.N_exc] = c.I_bg_exc_pA
         timed_input[:, c.N_exc :] = c.I_bg_inh_pA
-        timed_input[n_ts_pre : n_ts_pre + n_ts_stim, : c.N_exc] += np.outer(
-            stim_vals, self._stim_dist_pA
-        ).astype(np.float32)
+        timed_input[n_ts_pre : n_ts_pre + n_ts_stim, : c.N_exc] += (
+            self._stim_to_current(stim_vals)
+        )
 
-        _seed = c.seed if seed is None else seed
+        _base = c.seed if seed is None else seed
+        # Each source gets an independent seed derived from the base.
+        # Fixed sources always use c.seed so they don't vary across runs.
+        _seed_v    = _base * 3     if vary_init_v      else c.seed
+        _seed_conn = _base * 3 + 1 if vary_connectivity else c.seed
+        _seed_w    = _base * 3 + 2 if vary_weights      else c.seed
 
         b2.start_scope()
-        b2.seed(_seed)
+        b2.seed(_seed_conn)   # Brian2 RNG: only used for syn.connect(p=...)
         b2.defaultclock.dt = dt
 
-        rng = np.random.default_rng(_seed)
+        rng_v = np.random.default_rng(_seed_v)
+        rng_w = np.random.default_rng(_seed_w)
         bgcurrent = b2.TimedArray(timed_input * pA, dt=dt)
 
         eqs = """
@@ -193,13 +295,13 @@ class RandomEINetwork:
             refractory=tau_r,
             method="euler",
         )
-        neurons[: c.N_exc].v = "E_L + (rand() - 0.5) * 10*mV"
-        neurons[c.N_exc :].v = "E_inh + (rand() - 0.5) * 10*mV"
+        neurons[: c.N_exc].v = (c.E_L_mV   + rng_v.uniform(-5, 5, c.N_exc)) * mV
+        neurons[c.N_exc :].v = (c.E_inh_mV + rng_v.uniform(-5, 5, c.N_inh)) * mV
         neurons.g_exc = 0 * nS
         neurons.g_inh = 0 * nS
 
         def _w(mean, var, n):
-            return np.clip(rng.normal(mean, var, n), 0, None) * nS
+            return np.clip(rng_w.normal(mean, var, n), 0, None) * nS
 
         syn_ee = b2.Synapses(neurons[: c.N_exc], neurons[: c.N_exc],
                              model="w_ee : siemens", on_pre="g_exc += w_ee")

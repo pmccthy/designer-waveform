@@ -299,3 +299,100 @@ class AsymBaselineSplitGaussianWaveform(Waveform):
             f"baseline_rise={self.baseline_rise:.3g}, "
             f"baseline_fall={self.baseline_fall:.3g})"
         )
+
+
+class RectangularPulseWaveform(Waveform):
+    """Single rectangular (square-wave) pulse.
+
+        y(t) = amplitude   for onset_ms <= t < onset_ms + duration_ms
+               baseline    otherwise
+
+    Args:
+        onset_ms: Start of the pulse relative to stimulus onset.
+        duration_ms: Width of the pulse.
+        amplitude: Pulse height.  Should be in [0, 1] for opsin-drive envelopes.
+        baseline: Value outside the pulse window.
+    """
+
+    def __init__(self, onset_ms=0.0, duration_ms=50.0, amplitude=1.0, baseline=0.0):
+        self.onset_ms = onset_ms
+        self.duration_ms = duration_ms
+        self.amplitude = amplitude
+        self.baseline = baseline
+
+    def __call__(self, t):
+        t = np.asarray(t, dtype=float)
+        active = (t >= self.onset_ms) & (t < self.onset_ms + self.duration_ms)
+        return np.where(active, self.amplitude, self.baseline)
+
+    def to_params(self):
+        return np.array([self.onset_ms, self.duration_ms, self.amplitude, self.baseline])
+
+    @classmethod
+    def from_params(cls, params):
+        return cls(*params)
+
+    def __repr__(self):
+        return (f"RectangularPulseWaveform(onset_ms={self.onset_ms:.3g}, "
+                f"duration_ms={self.duration_ms:.3g}, amplitude={self.amplitude:.3g}, "
+                f"baseline={self.baseline:.3g})")
+
+
+class PulseTrainWaveform(Waveform):
+    """Periodic rectangular pulse train.
+
+    Pulses of width ``pulse_duration_ms`` repeat at ``frequency_hz``,
+    starting at ``onset_ms`` and running for ``train_duration_ms``.
+    For well-defined pulses: ``pulse_duration_ms < 1000 / frequency_hz``.
+
+    Args:
+        onset_ms: Start of the train relative to stimulus onset.
+        pulse_duration_ms: Width of each individual pulse.
+        frequency_hz: Pulse repetition rate.
+        train_duration_ms: Total duration of the train.
+        amplitude: Amplitude during each pulse.
+        baseline: Amplitude between pulses and outside the train.
+    """
+
+    def __init__(
+        self,
+        onset_ms=0.0,
+        pulse_duration_ms=20.0,
+        frequency_hz=25.0,
+        train_duration_ms=1000.0,
+        amplitude=1.0,
+        baseline=0.0,
+    ):
+        self.onset_ms = onset_ms
+        self.pulse_duration_ms = pulse_duration_ms
+        self.frequency_hz = frequency_hz
+        self.train_duration_ms = train_duration_ms
+        self.amplitude = amplitude
+        self.baseline = baseline
+
+    def __call__(self, t):
+        t = np.asarray(t, dtype=float)
+        period_ms = 1000.0 / self.frequency_hz
+        t_rel = t - self.onset_ms
+        in_train = (t_rel >= 0) & (t_rel < self.train_duration_ms)
+        in_pulse = (t_rel % period_ms) < self.pulse_duration_ms
+        return np.where(in_train & in_pulse, self.amplitude, self.baseline)
+
+    def to_params(self):
+        return np.array([
+            self.onset_ms, self.pulse_duration_ms, self.frequency_hz,
+            self.train_duration_ms, self.amplitude, self.baseline,
+        ])
+
+    @classmethod
+    def from_params(cls, params):
+        return cls(*params)
+
+    def __repr__(self):
+        return (
+            f"PulseTrainWaveform(onset_ms={self.onset_ms:.3g}, "
+            f"pulse_duration_ms={self.pulse_duration_ms:.3g}, "
+            f"frequency_hz={self.frequency_hz:.3g}, "
+            f"train_duration_ms={self.train_duration_ms:.3g}, "
+            f"amplitude={self.amplitude:.3g}, baseline={self.baseline:.3g})"
+        )
