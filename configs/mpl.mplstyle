@@ -1,0 +1,8 @@
+## designer-waveform matplotlib style
+
+# No padding at start/end of x-axis — eliminates whitespace at sides
+axes.xmargin : 0
+
+# Hide top and right spines by default
+axes.spines.top   : False
+axes.spines.right : False
