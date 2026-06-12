@@ -218,20 +218,29 @@ class SigmoidPowerCurve:
     maximally-expressing neuron; per-neuron expression heterogeneity in
     the network model scales this down.
 
+    Named presets are available via classmethods:
+
+    * :meth:`c1v1` — C1V1-A (default parameters, ~1175 pA peak, saturates
+      at ~0.1 mW/mm²).
+    * :meth:`chrmine` — ChRmine (red-shifted, ~4600 pA peak, saturates
+      at ~0.7 mW/mm²).
+
     Args:
         i_max_pA: Saturating photocurrent for a maximally-expressing
             neuron (pA).
         half_sat_mW_mm2: Irradiance at which current reaches half its
-            maximum (mW/mm²).  For C1V1-A this is approximately
-            0.0015 mW/mm².
+            maximum (mW/mm²).  Note: this is tissue irradiance, not
+            source power — :class:`OpticsConfig` handles the source→tissue
+            conversion upstream.
         hill_n: Hill coefficient (dimensionless).  ``n=1`` gives a
             first-order (Michaelis-Menten) response; larger values
             produce a steeper sigmoid.
 
     Example:
-        >>> curve = SigmoidPowerCurve(i_max_pA=1175, half_sat_mW_mm2=0.0015)
+        >>> curve = SigmoidPowerCurve.c1v1()
         >>> curve(0.0015)   # → ~587.5 pA  (half-max)
-        >>> curve(0.1)      # → ~1174.98 pA (near saturation)
+        >>> curve = SigmoidPowerCurve.chrmine()
+        >>> curve(0.037)    # → ~2300 pA   (half-max)
     """
 
     def __init__(
@@ -266,3 +275,18 @@ class SigmoidPowerCurve:
             f"half_sat_mW_mm2={self.half_sat_mW_mm2}, "
             f"hill_n={self.hill_n})"
         )
+
+    @classmethod
+    def c1v1(cls) -> SigmoidPowerCurve:
+        """C1V1-A preset: ~1175 pA peak, half-sat ~0.0015 mW/mm²."""
+        return cls(i_max_pA=1175.0, half_sat_mW_mm2=0.0015, hill_n=1.0)
+
+    @classmethod
+    def chrmine(cls) -> SigmoidPowerCurve:
+        """ChRmine preset: ~4600 pA peak, half-sat ~0.037 mW/mm².
+
+        Parameters are approximate — ChRmine saturates near 0.7 mW/mm²
+        (95% saturation at K½ × 19 ≈ 0.7 mW/mm² → K½ ≈ 0.037 mW/mm²).
+        Refine ``half_sat_mW_mm2`` if you have measured data.
+        """
+        return cls(i_max_pA=4600.0, half_sat_mW_mm2=0.037, hill_n=1.0)

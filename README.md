@@ -51,4 +51,9 @@ print(best_wf)
 ## Dependencies
 
 - [Brian2](https://brian2.readthedocs.io/) — spiking neural network simulation
+- [PyNWB](https://pynwb.readthedocs.io/) — NWB file I/O
 - NumPy, SciPy, Matplotlib
+
+## Allen SDK
+
+Some notebooks in `experiment_nb/` use the [Allen SDK](https://allensdk.readthedocs.io/) to load experimental data. The Allen SDK requires `numpy < 1.24`, which is incompatible with Brian2 2.10+ (`numpy >= 2.0`), so it cannot be installed in the `designer_waveform` environment. These notebooks should be run in a separate environment that has the Allen SDK installed (e.g. `allen_env`). The `designer_waveform` package itself has no Allen SDK dependency.
