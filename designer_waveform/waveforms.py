@@ -301,6 +301,267 @@ class AsymBaselineSplitGaussianWaveform(Waveform):
         )
 
 
+class GaussianExpFallWaveform(Waveform):
+    """Gaussian rise, single-exponential fall — a skewed bump with a heavy tail.
+
+    The rising half is the left side of a Gaussian; the falling half is a pure
+    exponential decay rather than a Gaussian. This gives a *heavy* (exponential)
+    tail instead of the super-exponential decay of a Gaussian, so it tracks the
+    long, slow decay of a sensory PSTH far better while still allowing a sharp
+    peak:
+
+        y(t) = (amplitude - baseline_rise) * exp(-0.5 * ((t - mu) / sigma_rise)**2)
+                + baseline_rise,                                    t <  mu
+
+        y(t) = (amplitude - baseline_fall) * exp(-(t - mu) / tau_fall)
+                + baseline_fall,                                    t >= mu
+
+    Both halves equal ``amplitude`` at ``t = mu``, so the waveform is continuous
+    at the peak even when the two baselines differ. As ``t -> -inf`` it tends to
+    ``baseline_rise``; as ``t -> +inf`` it tends to ``baseline_fall``.
+
+    This is the minimal change from
+    :class:`AsymBaselineSplitGaussianWaveform` (same six-parameter footprint,
+    ``sigma_fall`` simply becomes the decay constant ``tau_fall``) and is the
+    recommended drop-in when the *rise/peak* already fits but the *tail* decays
+    too quickly.
+
+    Args:
+        amplitude: Peak value at ``t = mu``.
+        mu: Peak time.
+        sigma_rise: Width of the rising (left) Gaussian half. Strictly positive.
+        tau_fall: Decay time constant of the falling exponential. Strictly
+            positive; larger values give a longer, heavier tail.
+        baseline_rise: Asymptotic level as ``t -> -inf`` (pre-stim offset).
+        baseline_fall: Asymptotic level as ``t -> +inf`` (post-stim plateau).
+
+    Notes:
+        Suggested bounds for :meth:`Waveform.optimise`: ``amplitude > 0``,
+        ``sigma_rise > 0``, ``tau_fall > 0``, with ``baseline_rise`` and
+        ``baseline_fall`` typically ``>= 0`` for opto envelopes.
+    """
+
+    def __init__(
+        self,
+        amplitude=1.0,
+        mu=0.0,
+        sigma_rise=1.0,
+        tau_fall=1.0,
+        baseline_rise=0.0,
+        baseline_fall=0.0,
+    ):
+        self.amplitude = amplitude
+        self.mu = mu
+        self.sigma_rise = sigma_rise
+        self.tau_fall = tau_fall
+        self.baseline_rise = baseline_rise
+        self.baseline_fall = baseline_fall
+
+    def __call__(self, t):
+        t = np.asarray(t, dtype=float)
+        dt = t - self.mu
+        rise = (self.amplitude - self.baseline_rise) * np.exp(
+            -0.5 * (dt / self.sigma_rise) ** 2
+        ) + self.baseline_rise
+        fall = (self.amplitude - self.baseline_fall) * np.exp(
+            -dt / self.tau_fall
+        ) + self.baseline_fall
+        return np.where(t < self.mu, rise, fall)
+
+    def to_params(self):
+        return np.array(
+            [
+                self.amplitude,
+                self.mu,
+                self.sigma_rise,
+                self.tau_fall,
+                self.baseline_rise,
+                self.baseline_fall,
+            ]
+        )
+
+    @classmethod
+    def from_params(cls, params):
+        return cls(*params)
+
+    def __repr__(self):
+        return (
+            f"GaussianExpFallWaveform("
+            f"amplitude={self.amplitude:.3g}, mu={self.mu:.3g}, "
+            f"sigma_rise={self.sigma_rise:.3g}, tau_fall={self.tau_fall:.3g}, "
+            f"baseline_rise={self.baseline_rise:.3g}, "
+            f"baseline_fall={self.baseline_fall:.3g})"
+        )
+
+
+class GaussianBiExpFallWaveform(Waveform):
+    """Gaussian rise, *bi-exponential* fall — captures two decay timescales.
+
+    The falling half is the weighted sum of a fast and a slow exponential, which
+    reproduces the common sensory-PSTH shape of a rapid post-peak drop followed
+    by a slowly-decaying sustained component (and the gentle "shoulder" their
+    sum produces in between):
+
+        y(t) = (amplitude - baseline_rise) * exp(-0.5 * ((t - mu) / sigma_rise)**2)
+                + baseline_rise,                                    t <  mu
+
+        y(t) = (amplitude - baseline_fall) * [ w * exp(-(t - mu) / tau_fast)
+                + (1 - w) * exp(-(t - mu) / tau_slow) ]
+                + baseline_fall,                                    t >= mu
+
+    where ``w = weight_fast``. Because the two exponentials each equal 1 at
+    ``t = mu`` and the weights sum to 1, the falling half equals ``amplitude``
+    at the peak, so the waveform is continuous at ``mu``.
+
+    Args:
+        amplitude: Peak value at ``t = mu``.
+        mu: Peak time.
+        sigma_rise: Width of the rising (left) Gaussian half. Strictly positive.
+        tau_fast: Fast decay constant (the rapid post-peak drop). Strictly
+            positive.
+        tau_slow: Slow decay constant (the sustained tail). Strictly positive;
+            normally ``tau_slow > tau_fast``.
+        weight_fast: Fraction of the falling amplitude carried by the fast
+            component, in ``[0, 1]``. ``w = 1`` recovers a single fast
+            exponential; ``w = 0`` recovers a single slow exponential.
+        baseline_rise: Asymptotic level as ``t -> -inf`` (pre-stim offset).
+        baseline_fall: Asymptotic level as ``t -> +inf`` (post-stim plateau).
+
+    Notes:
+        Suggested bounds for :meth:`Waveform.optimise`: ``amplitude > 0``,
+        ``sigma_rise > 0``, ``tau_fast > 0``, ``tau_slow > 0``,
+        ``0 <= weight_fast <= 1``, ``baseline_rise, baseline_fall >= 0``. To keep
+        ``tau_fast`` and ``tau_slow`` from swapping roles during optimisation,
+        give them non-overlapping bounds (e.g. ``tau_fast in (2, 30)``,
+        ``tau_slow in (30, 300)``).
+    """
+
+    def __init__(
+        self,
+        amplitude=1.0,
+        mu=0.0,
+        sigma_rise=1.0,
+        tau_fast=1.0,
+        tau_slow=10.0,
+        weight_fast=0.5,
+        baseline_rise=0.0,
+        baseline_fall=0.0,
+    ):
+        self.amplitude = amplitude
+        self.mu = mu
+        self.sigma_rise = sigma_rise
+        self.tau_fast = tau_fast
+        self.tau_slow = tau_slow
+        self.weight_fast = weight_fast
+        self.baseline_rise = baseline_rise
+        self.baseline_fall = baseline_fall
+
+    def __call__(self, t):
+        t = np.asarray(t, dtype=float)
+        dt = t - self.mu
+        w = self.weight_fast
+        rise = (self.amplitude - self.baseline_rise) * np.exp(
+            -0.5 * (dt / self.sigma_rise) ** 2
+        ) + self.baseline_rise
+        decay = w * np.exp(-dt / self.tau_fast) + (1.0 - w) * np.exp(
+            -dt / self.tau_slow
+        )
+        fall = (self.amplitude - self.baseline_fall) * decay + self.baseline_fall
+        return np.where(t < self.mu, rise, fall)
+
+    def to_params(self):
+        return np.array(
+            [
+                self.amplitude,
+                self.mu,
+                self.sigma_rise,
+                self.tau_fast,
+                self.tau_slow,
+                self.weight_fast,
+                self.baseline_rise,
+                self.baseline_fall,
+            ]
+        )
+
+    @classmethod
+    def from_params(cls, params):
+        return cls(*params)
+
+    def __repr__(self):
+        return (
+            f"GaussianBiExpFallWaveform("
+            f"amplitude={self.amplitude:.3g}, mu={self.mu:.3g}, "
+            f"sigma_rise={self.sigma_rise:.3g}, tau_fast={self.tau_fast:.3g}, "
+            f"tau_slow={self.tau_slow:.3g}, weight_fast={self.weight_fast:.3g}, "
+            f"baseline_rise={self.baseline_rise:.3g}, "
+            f"baseline_fall={self.baseline_fall:.3g})"
+        )
+
+
+class LogNormalWaveform(Waveform):
+    """Log-normal bump — intrinsically right-skewed with a heavy tail.
+
+    A single-component, naturally asymmetric pulse: a sharp rise after an onset
+    delay followed by a long, heavy tail. Defined for ``t > t0`` (and held at
+    ``baseline`` before that), which also lets it reproduce a response latency
+    where the PSTH sits flat before rising:
+
+        x    = (t - t0) / tau
+        y(t) = (amplitude - baseline) * exp(-0.5 * (ln(x) / sigma)**2) + baseline,
+                                                                   t > t0
+        y(t) = baseline,                                           t <= t0
+
+    The bump peaks at ``t = t0 + tau`` with value ``amplitude`` (since the
+    exponent is zero when ``x = 1``). ``sigma`` controls skew/tail heaviness:
+    larger ``sigma`` gives a more skewed shape with a longer tail.
+
+    Args:
+        amplitude: Peak value (attained at ``t = t0 + tau``).
+        t0: Onset time; the waveform is flat at ``baseline`` for ``t <= t0``.
+        tau: Time from onset to the peak (sets the peak location). Strictly
+            positive.
+        sigma: Log-scale width / shape. Strictly positive; larger values give a
+            heavier right tail.
+        baseline: Additive offset / asymptotic level outside the bump.
+
+    Notes:
+        Suggested bounds for :meth:`Waveform.optimise`: ``amplitude > 0``,
+        ``tau > 0``, ``sigma > 0``, ``baseline >= 0``. ``t0`` may be negative
+        (onset before the stim window) if the rise has no measurable latency.
+    """
+
+    def __init__(self, amplitude=1.0, t0=0.0, tau=1.0, sigma=0.5, baseline=0.0):
+        self.amplitude = amplitude
+        self.t0 = t0
+        self.tau = tau
+        self.sigma = sigma
+        self.baseline = baseline
+
+    def __call__(self, t):
+        t = np.asarray(t, dtype=float)
+        active = t > self.t0
+        # Evaluate ln(x) only where active; use a safe placeholder elsewhere.
+        x = np.where(active, (t - self.t0) / self.tau, 1.0)
+        bump = (self.amplitude - self.baseline) * np.exp(
+            -0.5 * (np.log(x) / self.sigma) ** 2
+        ) + self.baseline
+        return np.where(active, bump, self.baseline)
+
+    def to_params(self):
+        return np.array([self.amplitude, self.t0, self.tau, self.sigma, self.baseline])
+
+    @classmethod
+    def from_params(cls, params):
+        return cls(*params)
+
+    def __repr__(self):
+        return (
+            f"LogNormalWaveform(amplitude={self.amplitude:.3g}, t0={self.t0:.3g}, "
+            f"tau={self.tau:.3g}, sigma={self.sigma:.3g}, "
+            f"baseline={self.baseline:.3g})"
+        )
+
+
 class RectangularPulseWaveform(Waveform):
     """Single rectangular (square-wave) pulse.
 
