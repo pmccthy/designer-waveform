@@ -4,7 +4,11 @@ A framework for optimising stimulation waveforms to evoke naturalistic populatio
 
 ## Overview
 
-Typical optogenetic stimulation protocols do not produce the same population-level activity as natural sensory input, partally due to strong synchronous stimulation. This repository provides tools to find stimulation waveforms that evoke more naturalistic activity. Given a target population response (e.g. a PSTH recorded during natural stimulation), it searches the space of parametric waveforms to find the stimulus shape that drives a neural population model towards that target.
+Typical optogenetic stimulation protocols do not produce the same population-level activity as natural sensory input, partially due to strong synchronous stimulation. This repository provides tools to find stimulation waveforms that evoke more naturalistic activity. Given a target population response (e.g. a PSTH recorded during natural stimulation), it searches the space of parametric waveforms to find the stimulus shape that drives a neural population model towards that target.
+
+![Schematic of the designer waveform optimisation loop](designer_waveform_schematic.png)
+
+*Optimisation loop: a candidate waveform drives a spiking network model of opsin-expressing neurons; the population-averaged response is compared to the target, and the waveform parameters are updated until the mismatch falls below a threshold, yielding the optimised waveform.*
 
 The core design separates waveform parameterisation from simulation logic. Any callable that maps a waveform to a scalar loss can be used as the objective, making it straightforward to swap in different neural population models (Brian2, rate models, etc.) without modifying the waveform or optimisation code.
 
